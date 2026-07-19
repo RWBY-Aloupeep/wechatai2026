@@ -1,0 +1,8 @@
+{
+  "name": "wechatai2026-miniprogram",
+  "version": "1.0.0",
+  "description": "Mini-program client dependencies (npm build via WeChat DevTools).",
+  "dependencies": {
+    "cannon-es": "^0.20.0"
+  }
+}

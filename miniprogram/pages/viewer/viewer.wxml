@@ -1,0 +1,13 @@
+<xr-viewer
+  id="viewer"
+  width="{{width}}"
+  height="{{height}}"
+  render-width="{{renderWidth}}"
+  render-height="{{renderHeight}}"
+  bind:modelready="onModelReady"
+  style="width: {{width}}px; height: {{height}}px;"
+/>
+
+<!-- Phase 2 TODO: a "拍照生成" (capture-to-generate) entry point will sit
+     alongside this Reset button once camera capture / upload UI exists. -->
+<cover-view class="reset-btn" bindtap="onResetTap">重置</cover-view>

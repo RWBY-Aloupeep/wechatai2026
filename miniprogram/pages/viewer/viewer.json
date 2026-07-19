@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "3D 预览",
+  "usingComponents": {
+    "xr-viewer": "/components/xr-viewer/index"
+  }
+}

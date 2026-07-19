@@ -1,0 +1,66 @@
+<xr-scene bind:ready="onSceneReady" bind:tick="onTick">
+  <xr-assets>
+    <!-- Phase 2 TODO: replace this bundled local path with a remote/cloud-storage
+         URL once photo-to-3D generation produces a per-user GLB (e.g. pass it in
+         as `properties.modelSrc` from the page instead of hardcoding `src` here).
+         `asset-id` and every downstream reference to "toy-model" stay the same. -->
+    <xr-asset-load type="gltf" asset-id="toy-model" src="/assets/sample.glb" />
+  </xr-assets>
+
+  <xr-light type="ambient" color="1 1 1" intensity="1" />
+  <xr-light type="directional" rotation="40 70 0" color="1 1 1" intensity="3" cast-shadow />
+
+  <!-- xr-physics must be a direct child of xr-scene (not nested deeper) --
+       this is what gates the Shape/touch-shape tap-detection system below.
+       We deliberately do NOT add xr-frame's own `rigidbody` attribute to any
+       node: its Beta API has no restitution/friction/impulse support (see
+       utils/physics.js), so all simulation is done via cannon-es instead --
+       xr-physics + cube-shape here are used ONLY for tap hit-testing.
+
+       KNOWN ISSUE: the WeChat DevTools SIMULATOR fails to boot xr-frame's
+       PhysSystem/ENGINE_WASM as soon as <xr-physics> is present ("WebAssembly
+       is not defined" in draco_mini.js/ENGINE_WASM.js, cascading into "Cannot
+       read property 'PhysSystem' of undefined"). This is a documented
+       simulator-only limitation (confirmed via WeChat developer community
+       reports of the same "PhysSystem of undefined" crash occurring only in
+       the simulator, not on real devices) -- test this feature via 真机预览,
+       not the simulator. -->
+  <xr-physics />
+
+  <!-- Initial position matches DROP_START_POSITION in index.js so there's no
+       visible jump between first paint and the physics world taking over on
+       the first onTick after onSceneReady. cube-shape is a hit-test proxy
+       only (sized from utils/proxy-shape.js, kept in sync with the cannon-es
+       body's collision box there -- see FALLBACK_HALF_EXTENTS); it is NOT
+       what drives physics, and is independent of the glTF mesh's own scale
+       (see index.js for why NO extra scale is applied to the glTF itself --
+       the GLB's own root node matrix already corrects it to ~1.5 units).
+       Phase 2 TODO: swap this box for a shape derived from a precomputed
+       convex hull, same source of truth as proxy-shape.js. -->
+  <!-- NOTE: `size` below (0.8 1.2 0.8) must be kept equal to
+       2 * FALLBACK_HALF_EXTENTS from utils/proxy-shape.js (0.4 0.6 0.4). WXML
+       attributes can't reference that JS constant directly, so if
+       FALLBACK_HALF_EXTENTS changes, update this line too. -->
+  <xr-node
+    id="model-node"
+    position="0 2 0"
+    cube-shape="size: 0.8 1.2 0.8"
+    bind:touch-shape="onTouchModel"
+  >
+    <xr-gltf id="model-gltf" model="toy-model" bind:gltf-loaded="onGltfLoaded" />
+  </xr-node>
+
+  <!-- camera-orbit-control gives single-finger drag orbit + pinch zoom for
+       free. The `target:` sub-value syntax mirrors the documented rigidbody
+       attribute-string convention (e.g. rigidbody="mass: 5.0"); if orbiting
+       doesn't center on the model correctly, verify this specific syntax
+       against DevTools autocomplete -- everything else in this file (asset
+       loading, physics, tap, scale) is now confirmed working on a real
+       device, so this is the one remaining unverified piece. -->
+  <xr-camera
+    id="main-camera"
+    position="0 2 6"
+    clear-color="0.85 0.87 0.9 1"
+    camera-orbit-control="target: 0 0.6 0"
+  />
+</xr-scene>

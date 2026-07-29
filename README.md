@@ -86,14 +86,18 @@ xr-frame 在开发者工具内置模拟器中的渲染/物理表现并不完全�
 换取临时 HTTPS 链接加载该模型。
 
 **密钥配置（必需）**：云开发控制台 → 云函数 → `generateModel` → 配置 → 环境
-变量，设置 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`（腾讯云 API 密钥，需已
-开通混元生 3D 并领取免费积分）。**密钥缺失时云函数自动退化为占位模式**（直接
-返回内置占位 GLB），开发环境无腾讯云账号也能跑通全链路。
+变量，设置 **`TOKENHUB_API_KEY`**（在 [TokenHub 控制台](https://cloud.tencent.com/product/tokenhub)
+创建的 API Key，需已开通混元生 3D）。**密钥缺失时云函数自动退化为占位模式**
+（直接返回内置占位 GLB），无 TokenHub 账号也能跑通全链路。
+
+> 走的是 TokenHub 平台（OpenAI 风格 REST + Bearer 认证，单个 API Key），而非
+> 腾讯云 CAM 的 SecretId/SecretKey 签名方式——两者密钥不通用。可用
+> `{"action": "diagnose"}` 云端测试自检密钥形状（只返回长度/前缀，不含内容）。
 
 **云函数部署**：在开发者工具的资源管理器中右键 `cloudfunctions/generateModel`
-→「上传并部署：云端安装依赖」。修改云函数代码后需要重新执行此操作。依赖含
-`tencentcloud-sdk-nodejs-ai3d`；`config.json` 已把函数超时设为 60 秒（`query`
-在任务完成时要下载 GLB 并转存，默认 3 秒不够）。
+→「上传并部署：云端安装依赖」。修改云函数代码后需要重新执行此操作。
+`config.json` 已把函数超时设为 60 秒（`query` 在任务完成时要下载 GLB 并转存，
+默认 3 秒不够）。
 
 > - 云开发环境 ID 已配置在 `miniprogram/app.js`（`cloud1-d0gh8tthce732831b`）。
 > - 正式发布时需将云存储临时链接域名（`*.tcb.qcloud.la`）加入小程序后台的

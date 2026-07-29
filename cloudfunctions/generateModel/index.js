@@ -1,21 +1,26 @@
-// generateModel -- Phase 2 pipeline: photo -> Hunyuan 3D (混元生3D 极速版) -> GLB.
+// generateModel -- Phase 2 pipeline: photo -> Hunyuan 3D -> GLB.
 //
-// Cloud functions cap out at 60s but generation takes ~1.5min, so this is an
+// Uses Tencent's TokenHub platform (OpenAI-style REST + Bearer auth), NOT the
+// tencentcloud CAM SDK: TokenHub issues a single API key instead of a
+// SecretId/SecretKey pair.
+//   submit: POST https://tokenhub.tencentmaas.com/v1/api/3d/submit
+//   query:  POST https://tokenhub.tencentmaas.com/v1/api/3d/query
+//
+// Generation takes ~90s and cloud functions cap at 60s, so this is an
 // action-dispatch function driven by client-side polling:
 //
 //   { action: 'submit', imageFileID }
 //     -> { ok, jobId }                          real generation submitted
-//     -> { ok, stub: true, modelFileID }        stub fallback (no credentials)
+//     -> { ok, stub: true, modelFileID }        stub fallback (no API key)
 //   { action: 'query', jobId }
-//     -> { ok, status: 'processing' }           still WAIT/RUN
+//     -> { ok, status: 'processing' }
 //     -> { ok, status: 'done', modelFileID }    GLB fetched + stored in models/
-//     -> { ok: false, error }                   generation FAIL or other error
+//     -> { ok: false, error }
+//   { action: 'diagnose' }                      credential shape, no secrets
 //
-// Credentials come from the function's environment variables
-// (TENCENT_SECRET_ID / TENCENT_SECRET_KEY, set in console: 云函数 -> 配置 ->
-// 环境变量), never from code. If they are absent, 'submit' falls back to the
-// original stub behavior (uploads the bundled placeholder GLB) so the app
-// keeps working in dev environments without Tencent Cloud access.
+// The API key comes from the TOKENHUB_API_KEY environment variable (console:
+// 云函数 -> 配置 -> 环境变量), never from code. Without it, 'submit' falls back
+// to uploading the bundled placeholder GLB so the app still works in dev.
 //
 // Phase 2 TODO (later passes): mesh simplification + precomputed convex hull
 // alongside the GLB (see miniprogram/utils/proxy-shape.js), and cleanup of
@@ -27,22 +32,52 @@ const https = require('https');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
-const AI3D_REGION = 'ap-guangzhou';
+const TOKENHUB_BASE = 'https://tokenhub.tencentmaas.com/v1/api/3d';
+// "hy-3d-express" is the rapid tier (~90s), the best fit for an interactive
+// mini-program flow; "hy-3d-3.0"/"hy-3d-3.1" are the higher-quality/slower
+// professional tiers. Overridable per-call via event.model for testing.
+const DEFAULT_MODEL = 'hy-3d-express';
 
-function makeAi3dClient() {
+function apiKey() {
   // Trim: pasting into the console's env-var field easily picks up stray
-  // whitespace/newlines, which Tencent Cloud rejects as an unknown SecretId.
-  const secretId = (process.env.TENCENT_SECRET_ID || '').trim();
-  const secretKey = (process.env.TENCENT_SECRET_KEY || '').trim();
-  if (!secretId || !secretKey) {
-    return null;
-  }
-  const tencentcloud = require('tencentcloud-sdk-nodejs-ai3d');
-  const Ai3dClient = tencentcloud.ai3d.v20250513.Client;
-  return new Ai3dClient({
-    credential: { secretId, secretKey },
-    region: AI3D_REGION,
-    profile: { httpProfile: { endpoint: 'ai3d.tencentcloudapi.com' } },
+  // whitespace, which would corrupt the Authorization header.
+  return (process.env.TOKENHUB_API_KEY || '').trim();
+}
+
+function httpsPostJson(url, body, headers) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const u = new URL(url);
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          ...headers,
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let json = null;
+          try {
+            json = JSON.parse(text);
+          } catch (e) {
+            // leave json null; caller reports the raw text
+          }
+          resolve({ statusCode: res.statusCode, json, text });
+        });
+        res.on('error', reject);
+      }
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
   });
 }
 
@@ -64,16 +99,30 @@ function downloadToBuffer(url) {
   });
 }
 
+// TokenHub's docs only show text-to-3D ({ model, prompt }); the image field
+// name for image-to-3D is not documented at this layer. The underlying
+// Tencent API uses ImageUrl/ImageBase64 (PascalCase) while TokenHub's own
+// fields are lowercase, so rather than guess once and burn a deploy+test
+// cycle per guess, try the plausible spellings in order and log which one
+// works. A rejected request creates no job, so this costs no credits.
+// Once confirmed in the logs, this list can collapse to the single winner.
+function imageFieldCandidates(imageUrl) {
+  return [
+    { name: 'image_url', body: { image_url: imageUrl } },
+    { name: 'ImageUrl', body: { ImageUrl: imageUrl } },
+    { name: 'image', body: { image: imageUrl } },
+  ];
+}
+
 async function submit(event) {
   const imageFileID = event.imageFileID || '';
   if (!imageFileID) {
     return { ok: false, error: 'imageFileID is required' };
   }
 
-  const client = makeAi3dClient();
-  if (!client) {
-    // Stub fallback: no Tencent Cloud credentials configured.
-    console.log('[generateModel] no credentials, using stub placeholder');
+  const key = apiKey();
+  if (!key) {
+    console.log('[generateModel] no TOKENHUB_API_KEY, using stub placeholder');
     const glbBuffer = fs.readFileSync(path.join(__dirname, 'placeholder.glb'));
     const uploadRes = await cloud.uploadFile({
       cloudPath: `models/${Date.now()}-${Math.floor(Math.random() * 1e6)}.glb`,
@@ -82,20 +131,46 @@ async function submit(event) {
     return { ok: true, stub: true, modelFileID: uploadRes.fileID };
   }
 
-  // Hunyuan takes an image URL; convert the cloud-storage fileID into a
-  // temporary HTTPS URL it can fetch.
+  // TokenHub fetches the image over HTTPS; turn the cloud-storage fileID into
+  // a signed temporary URL it can reach.
   const tempRes = await cloud.getTempFileURL({ fileList: [imageFileID] });
   const item = tempRes.fileList && tempRes.fileList[0];
   if (!item || !item.tempFileURL) {
     return { ok: false, error: 'could not resolve image temp URL' };
   }
 
-  const submitRes = await client.SubmitHunyuanTo3DRapidJob({
-    ImageUrl: item.tempFileURL,
-    ResultFormat: 'GLB',
-  });
-  console.log('[generateModel] submitted job:', submitRes.JobId);
-  return { ok: true, jobId: submitRes.JobId };
+  const model = event.model || DEFAULT_MODEL;
+  const attempts = [];
+  for (const candidate of imageFieldCandidates(item.tempFileURL)) {
+    const res = await httpsPostJson(
+      `${TOKENHUB_BASE}/submit`,
+      { model, ...candidate.body },
+      { Authorization: `Bearer ${key}` }
+    );
+    const jobId = res.json && (res.json.id || res.json.Id);
+    if (res.statusCode === 200 && jobId) {
+      console.log(
+        `[generateModel] submitted job ${jobId} using image field "${candidate.name}"`
+      );
+      return { ok: true, jobId, model, imageField: candidate.name };
+    }
+    console.log(
+      `[generateModel] image field "${candidate.name}" rejected:`,
+      res.statusCode,
+      res.text && res.text.slice(0, 300)
+    );
+    attempts.push({
+      field: candidate.name,
+      statusCode: res.statusCode,
+      body: res.text && res.text.slice(0, 300),
+    });
+  }
+
+  return {
+    ok: false,
+    error: 'all image field name candidates were rejected by TokenHub',
+    attempts,
+  };
 }
 
 async function query(event) {
@@ -103,34 +178,44 @@ async function query(event) {
   if (!jobId) {
     return { ok: false, error: 'jobId is required' };
   }
-
-  const client = makeAi3dClient();
-  if (!client) {
-    return { ok: false, error: 'credentials missing on query' };
+  const key = apiKey();
+  if (!key) {
+    return { ok: false, error: 'TOKENHUB_API_KEY missing on query' };
   }
 
-  const res = await client.QueryHunyuanTo3DRapidJob({ JobId: jobId });
-  const status = res.Status;
+  const res = await httpsPostJson(
+    `${TOKENHUB_BASE}/query`,
+    { model: event.model || DEFAULT_MODEL, id: jobId },
+    { Authorization: `Bearer ${key}` }
+  );
+  if (res.statusCode !== 200 || !res.json) {
+    return {
+      ok: false,
+      error: `query failed (${res.statusCode})`,
+      body: res.text && res.text.slice(0, 300),
+    };
+  }
+
+  const status = res.json.status;
   console.log('[generateModel] job', jobId, 'status:', status);
 
-  // Documented status values: WAIT / RUN / FAIL / DONE.
-  if (status === 'FAIL') {
-    return { ok: false, error: res.ErrorMessage || 'generation failed' };
+  if (status === 'failed' || status === 'FAIL') {
+    return { ok: false, error: res.json.error || 'generation failed' };
   }
-  if (status !== 'DONE') {
-    return { ok: true, status: 'processing' };
-  }
-
-  const files = res.ResultFile3Ds || [];
-  const glbFile = files.find((f) => (f.Type || '').toUpperCase() === 'GLB') || files[0];
-  if (!glbFile || !glbFile.Url) {
-    return { ok: false, error: 'no result file in DONE response' };
+  if (status !== 'completed') {
+    // queued / in_progress
+    return { ok: true, status: 'processing', raw: status };
   }
 
-  // Persist the (short-lived) result URL into our own cloud storage so the
-  // viewer gets a stable fileID and the asset survives past Hunyuan's URL
-  // expiry.
-  const glbBuffer = await downloadToBuffer(glbFile.Url);
+  const files = res.json.data || [];
+  const glb = files.find((f) => (f.type || '').toLowerCase() === 'glb') || files[0];
+  if (!glb || !glb.url) {
+    return { ok: false, error: 'no result file in completed response' };
+  }
+
+  // Persist into our own cloud storage: TokenHub's result URL is short-lived,
+  // and the viewer wants a stable fileID.
+  const glbBuffer = await downloadToBuffer(glb.url);
   const uploadRes = await cloud.uploadFile({
     cloudPath: `models/${jobId}.glb`,
     fileContent: glbBuffer,
@@ -138,35 +223,25 @@ async function query(event) {
   return { ok: true, status: 'done', modelFileID: uploadRes.fileID };
 }
 
-// Reports the SHAPE of the configured credentials without ever revealing
-// them: length, the (non-secret, universal) AKID prefix, and whitespace
-// detection -- stray whitespace from copy-pasting into the console env-var
-// field is a common cause of "SecretId is not found".
+// Reports the SHAPE of the configured key without revealing it.
 function diagnose() {
-  const id = process.env.TENCENT_SECRET_ID;
-  const key = process.env.TENCENT_SECRET_KEY;
-  const shape = (v) =>
-    v === undefined
-      ? 'NOT SET'
-      : {
-          length: v.length,
-          hasLeadingOrTrailingSpace: v !== v.trim(),
-          hasInnerWhitespace: /\s/.test(v.trim()),
-          isEmpty: v.trim().length === 0,
-        };
+  const raw = process.env.TOKENHUB_API_KEY;
+  if (raw === undefined) {
+    return { ok: true, diagnostic: true, state: 'TOKENHUB_API_KEY NOT SET' };
+  }
+  const trimmed = raw.trim();
   return {
     ok: true,
     diagnostic: true,
-    secretId: {
-      ...(typeof shape(id) === 'string' ? { state: shape(id) } : shape(id)),
-      // SecretId is an identifier (not a secret) and always starts with
-      // "AKID"; reporting whether that holds is safe and highly diagnostic.
-      startsWithAKID: id ? id.trim().startsWith('AKID') : false,
-      expectedLength: 36,
+    apiKey: {
+      length: trimmed.length,
+      hasLeadingOrTrailingSpace: raw !== trimmed,
+      isEmpty: trimmed.length === 0,
+      // Key prefixes are conventional, not secret; helps confirm key type.
+      startsWithSk: trimmed.startsWith('sk-'),
     },
-    secretKey: typeof shape(key) === 'string' ? { state: shape(key) } : shape(key),
-    expectedSecretKeyLength: 32,
-    region: AI3D_REGION,
+    model: DEFAULT_MODEL,
+    endpoint: TOKENHUB_BASE,
   };
 }
 

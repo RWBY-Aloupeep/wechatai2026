@@ -1,10 +1,9 @@
 {
   "name": "generateModel",
   "version": "1.0.0",
-  "description": "Photo-to-3D via Tencent Hunyuan 3D (rapid); stub fallback without credentials",
+  "description": "Photo-to-3D via Tencent TokenHub (Hunyuan 3D); stub fallback without API key",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "~2.6.3",
-    "tencentcloud-sdk-nodejs-ai3d": "^4.1.265"
+    "wx-server-sdk": "~2.6.3"
   }
 }

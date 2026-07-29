@@ -99,18 +99,27 @@ function downloadToBuffer(url) {
   });
 }
 
-// TokenHub's docs only show text-to-3D ({ model, prompt }); the image field
-// name for image-to-3D is not documented at this layer. The underlying
-// Tencent API uses ImageUrl/ImageBase64 (PascalCase) while TokenHub's own
-// fields are lowercase, so rather than guess once and burn a deploy+test
-// cycle per guess, try the plausible spellings in order and log which one
-// works. A rejected request creates no job, so this costs no credits.
-// Once confirmed in the logs, this list can collapse to the single winner.
-function imageFieldCandidates(imageUrl) {
+// TokenHub's docs only show text-to-3D ({ model, prompt }) -- verified: the
+// whole 3D page contains no image-to-3D example. The underlying Tencent API
+// uses ImageUrl/ImageBase64 (PascalCase) while TokenHub's own fields are
+// lowercase, so rather than guess once and burn a deploy+test cycle per
+// guess, try the plausible spellings in order and log which one works. A
+// rejected request creates no job, so this costs no credits. Once confirmed
+// in the logs, this list can collapse to the single winner.
+function urlFieldCandidates(imageUrl) {
   return [
     { name: 'image_url', body: { image_url: imageUrl } },
     { name: 'ImageUrl', body: { ImageUrl: imageUrl } },
+    // OpenAI vision style, in case TokenHub mirrors it here too.
+    { name: 'image_url.url', body: { image_url: { url: imageUrl } } },
     { name: 'image', body: { image: imageUrl } },
+  ];
+}
+
+function base64FieldCandidates(imageBase64) {
+  return [
+    { name: 'image_base64', body: { image_base64: imageBase64 } },
+    { name: 'ImageBase64', body: { ImageBase64: imageBase64 } },
   ];
 }
 
@@ -141,29 +150,49 @@ async function submit(event) {
 
   const model = event.model || DEFAULT_MODEL;
   const attempts = [];
-  for (const candidate of imageFieldCandidates(item.tempFileURL)) {
-    const res = await httpsPostJson(
-      `${TOKENHUB_BASE}/submit`,
-      { model, ...candidate.body },
-      { Authorization: `Bearer ${key}` }
-    );
-    const jobId = res.json && (res.json.id || res.json.Id);
-    if (res.statusCode === 200 && jobId) {
-      console.log(
-        `[generateModel] submitted job ${jobId} using image field "${candidate.name}"`
+
+  const tryCandidates = async (candidates) => {
+    for (const candidate of candidates) {
+      const res = await httpsPostJson(
+        `${TOKENHUB_BASE}/submit`,
+        { model, ...candidate.body },
+        { Authorization: `Bearer ${key}` }
       );
-      return { ok: true, jobId, model, imageField: candidate.name };
+      const jobId = res.json && (res.json.id || res.json.Id);
+      if (res.statusCode === 200 && jobId) {
+        console.log(
+          `[generateModel] submitted job ${jobId} using image field "${candidate.name}"`
+        );
+        return { ok: true, jobId, model, imageField: candidate.name };
+      }
+      console.log(
+        `[generateModel] image field "${candidate.name}" rejected:`,
+        res.statusCode,
+        res.text && res.text.slice(0, 300)
+      );
+      attempts.push({
+        field: candidate.name,
+        statusCode: res.statusCode,
+        body: res.text && res.text.slice(0, 300),
+      });
     }
-    console.log(
-      `[generateModel] image field "${candidate.name}" rejected:`,
-      res.statusCode,
-      res.text && res.text.slice(0, 300)
-    );
-    attempts.push({
-      field: candidate.name,
-      statusCode: res.statusCode,
-      body: res.text && res.text.slice(0, 300),
-    });
+    return null;
+  };
+
+  const viaUrl = await tryCandidates(urlFieldCandidates(item.tempFileURL));
+  if (viaUrl) {
+    return viaUrl;
+  }
+
+  // Only pay the download+encode cost if every URL-shaped field was rejected
+  // (e.g. if this endpoint accepts inline data only).
+  console.log('[generateModel] URL fields all rejected, trying base64');
+  const imgBuffer = await downloadToBuffer(item.tempFileURL);
+  const viaBase64 = await tryCandidates(
+    base64FieldCandidates(imgBuffer.toString('base64'))
+  );
+  if (viaBase64) {
+    return viaBase64;
   }
 
   return {

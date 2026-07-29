@@ -76,17 +76,23 @@ xr-frame 在开发者工具内置模拟器中的渲染/物理表现并不完全�
 > 仍需手动设对。当前 `components/xr-viewer/index.wxml` 中 `<xr-camera>` 已加
 > `rotation="0 180 0"` 修正此问题。
 
-### 拍照上传（Phase 2 第一步，已实现客户端部分）
+### 拍照生成流程（Phase 2，当前为占位生成）
 
-预览页右下角「拍照生成」按钮进入 `pages/capture/capture`：拍摄或从相册选择
-一张照片 → 预览确认 → 上传到微信云开发存储（`captures/` 目录）→ 跳回预览页，
-照片的云端 fileID 通过页面参数 `imageFileID` 传入（当前仅在 console 打印，
-即未来生成管线的输入）。3D 模型此时仍为内置示例；接入真实生成服务后，云函数
-将以该 fileID 为输入产出 GLB 并替换模型来源。
+预览页「拍照生成」→ `pages/capture/capture`：拍摄/选照片 → 预览确认 → 上传到
+云存储（`captures/`）→ 调用云函数 `generateModel` → 拿到生成的 GLB fileID →
+跳回预览页，预览页将 fileID 换取临时 HTTPS 链接（`wx.cloud.getTempFileURL`）
+并加载该远程模型。**云函数目前是占位实现**：不做真实生成，直接把内置的占位
+GLB 上传到 `models/` 并返回其 fileID——整条「拍照→上传→云函数→存储→查看器加载
+云端模型」链路已可端到端验证，后续只需替换云函数内 STUB 标记之间的部分为真实
+的混元生 3D 调用（接入要点已写在 `cloudfunctions/generateModel/index.js` 头部
+注释：任务提交/轮询、密钥放云函数环境变量等）。
 
-> 上传依赖云开发环境：需在微信开发者工具中为当前 AppID 开通云开发并选择环境
-> （`miniprogram/app.js` 中 `env` 为空字符串时使用默认环境；如上传报环境相关
-> 错误，请在 `app.js` 的 `globalData.env` 填入实际环境 ID）。
+**云函数部署**：在开发者工具的资源管理器中右键 `cloudfunctions/generateModel`
+→「上传并部署：云端安装依赖」。修改云函数代码后需要重新执行此操作。
+
+> - 云开发环境 ID 已配置在 `miniprogram/app.js`（`cloud1-d0gh8tthce732831b`）。
+> - 正式发布时需将云存储临时链接域名（`*.tcb.qcloud.la`）加入小程序后台的
+>   downloadFile 合法域名，开发/预览阶段勾选「不校验合法域名」即可。
 
 ### 图生 3D 服务选型（调研结论，尚未接入）
 

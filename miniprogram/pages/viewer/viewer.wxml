@@ -1,9 +1,11 @@
 <xr-viewer
+  wx:if="{{modelSrc}}"
   id="viewer"
   width="{{width}}"
   height="{{height}}"
   render-width="{{renderWidth}}"
   render-height="{{renderHeight}}"
+  model-src="{{modelSrc}}"
   bind:modelready="onModelReady"
   style="width: {{width}}px; height: {{height}}px;"
 />

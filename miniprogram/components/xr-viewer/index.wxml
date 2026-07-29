@@ -1,10 +1,10 @@
 <xr-scene bind:ready="onSceneReady" bind:tick="onTick">
   <xr-assets>
-    <!-- Phase 2 TODO: replace this bundled local path with a remote/cloud-storage
-         URL once photo-to-3D generation produces a per-user GLB (e.g. pass it in
-         as `properties.modelSrc` from the page instead of hardcoding `src` here).
-         `asset-id` and every downstream reference to "toy-model" stay the same. -->
-    <xr-asset-load type="gltf" asset-id="toy-model" src="/assets/sample.glb" />
+    <!-- modelSrc arrives from the page: either the bundled sample GLB or an
+         HTTPS temp URL for a generated model in cloud storage (resolved from
+         its fileID in viewer.js). asset-id "toy-model" and every downstream
+         reference stay the same regardless of source. -->
+    <xr-asset-load type="gltf" asset-id="toy-model" src="{{modelSrc}}" />
   </xr-assets>
 
   <xr-light type="ambient" color="1 1 1" intensity="1" />

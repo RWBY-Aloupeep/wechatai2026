@@ -46,6 +46,11 @@ Component({
     height: Number,
     renderWidth: Number,
     renderHeight: Number,
+    // GLB source: a bundled path or an HTTPS temp URL for a generated model
+    // in cloud storage. The page only creates this component after deciding
+    // the final value (wx:if in viewer.wxml), so it is static for the
+    // component's lifetime -- no dynamic re-load handling needed.
+    modelSrc: String,
   },
 
   data: {

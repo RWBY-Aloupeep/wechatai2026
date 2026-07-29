@@ -1,0 +1,9 @@
+{
+  "name": "generateModel",
+  "version": "1.0.0",
+  "description": "Photo-to-3D generation pipeline entry (stub: returns placeholder GLB)",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

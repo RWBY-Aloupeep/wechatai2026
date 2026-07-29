@@ -9,7 +9,7 @@
     <view class="btn-row">
       <button class="secondary-btn" bindtap="onChooseImage" disabled="{{uploading}}">重新选择</button>
       <button class="primary-btn" bindtap="onUpload" loading="{{uploading}}" disabled="{{uploading}}">
-        {{uploading ? '上传中…' : '上传并生成'}}
+        {{uploading ? statusText : '上传并生成'}}
       </button>
     </view>
   </block>

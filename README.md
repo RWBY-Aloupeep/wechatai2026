@@ -93,6 +93,21 @@ xr-frame 在开发者工具内置模拟器中的渲染/物理表现并不完全�
 > 走的是 TokenHub 平台（OpenAI 风格 REST + Bearer 认证，单个 API Key），而非
 > 腾讯云 CAM 的 SecretId/SecretKey 签名方式——两者密钥不通用。可用
 > `{"action": "diagnose"}` 云端测试自检密钥形状（只返回长度/前缀，不含内容）。
+>
+> 请求体字段用 **PascalCase**（`ImageUrl` / `ResultFormat`），与
+> [提交混元生3D 极速版任务](https://cloud.tencent.com/document/api/1804/123463)
+> 接口一致——TokenHub 文档只给了文生 3D 的例子，图生 3D 的字段名是实测确认的；
+> 只有 `model` 是 TokenHub 自己的路由参数，用小写。响应解析同时兼容 TokenHub
+> 的小写形式（`status`/`data[].url`）和底层的 PascalCase（`Status`/
+> `ResultFile3Ds[].Url`）。
+
+**云端测试速查**（云函数 → 云端测试，比走真机快）：
+
+```json
+{"action": "diagnose"}
+{"action": "submit", "imageFileID": "cloud://..."}
+{"action": "query",  "jobId": "1473953349631934464"}
+```
 
 **云函数部署**：在开发者工具的资源管理器中右键 `cloudfunctions/generateModel`
 →「上传并部署：云端安装依赖」。修改云函数代码后需要重新执行此操作。

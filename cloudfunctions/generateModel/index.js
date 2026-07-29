@@ -99,32 +99,17 @@ function downloadToBuffer(url) {
   });
 }
 
-// Per TokenHub's docs, "HY-3D-Express 请求的具体参数与 提交混元生3D 极速版任务
-// 接口一致" -- i.e. body params follow SubmitHunyuanTo3DRapidJob, which
-// documents PascalCase ImageUrl / ImageBase64 / ResultFormat / EnablePBR.
-// TokenHub's own example nonetheless shows lowercase `model` and `prompt`,
-// so the exact casing at the gateway is ambiguous; `model` is certainly
-// TokenHub's own routing param. PascalCase (the authoritative spelling) is
-// tried first, with lowercase variants as fallback. Each candidate carries a
-// casing-matched ResultFormat so we always get a single-file GLB rather than
-// relying on the undocumented default (the underlying docs show OBJ results
-// arriving as .zip bundles). A rejected request creates no job, so probing
-// costs no credits; once the logs confirm a winner this list can collapse.
-function urlFieldCandidates(imageUrl) {
-  return [
-    { name: 'ImageUrl', body: { ImageUrl: imageUrl, ResultFormat: 'GLB' } },
-    { name: 'image_url', body: { image_url: imageUrl, result_format: 'GLB' } },
-    // OpenAI vision style, in case TokenHub mirrors it here too.
-    { name: 'image_url.url', body: { image_url: { url: imageUrl } } },
-    { name: 'image', body: { image: imageUrl } },
-  ];
-}
-
-function base64FieldCandidates(imageBase64) {
-  return [
-    { name: 'ImageBase64', body: { ImageBase64: imageBase64, ResultFormat: 'GLB' } },
-    { name: 'image_base64', body: { image_base64: imageBase64, result_format: 'GLB' } },
-  ];
+// Request body for image-to-3D. Confirmed empirically against the live API:
+// PascalCase `ImageUrl` is accepted, matching TokenHub's statement that
+// HY-3D-Express params follow the SubmitHunyuanTo3DRapidJob interface
+// (ImageUrl / ImageBase64 / ResultFormat / EnablePBR) -- even though
+// TokenHub's own routing param `model` is lowercase.
+//
+// ResultFormat is set explicitly so we get a single-file GLB; the underlying
+// docs show OBJ results arriving as .zip bundles, which the viewer can't load.
+// ImageBase64 is the documented alternative if a URL is ever unreachable.
+function buildSubmitBody(model, imageUrl) {
+  return { model, ImageUrl: imageUrl, ResultFormat: 'GLB' };
 }
 
 async function submit(event) {
@@ -153,59 +138,29 @@ async function submit(event) {
   }
 
   const model = event.model || DEFAULT_MODEL;
-  const attempts = [];
-
-  const tryCandidates = async (candidates) => {
-    for (const candidate of candidates) {
-      const res = await httpsPostJson(
-        `${TOKENHUB_BASE}/submit`,
-        { model, ...candidate.body },
-        { Authorization: `Bearer ${key}` }
-      );
-      // TokenHub returns `id`; the underlying Rapid job returns `JobId`.
-      const jobId =
-        res.json && (res.json.id || res.json.Id || res.json.JobId);
-      if (res.statusCode === 200 && jobId) {
-        console.log(
-          `[generateModel] submitted job ${jobId} using image field "${candidate.name}"`
-        );
-        return { ok: true, jobId, model, imageField: candidate.name };
-      }
-      console.log(
-        `[generateModel] image field "${candidate.name}" rejected:`,
-        res.statusCode,
-        res.text && res.text.slice(0, 300)
-      );
-      attempts.push({
-        field: candidate.name,
-        statusCode: res.statusCode,
-        body: res.text && res.text.slice(0, 300),
-      });
-    }
-    return null;
-  };
-
-  const viaUrl = await tryCandidates(urlFieldCandidates(item.tempFileURL));
-  if (viaUrl) {
-    return viaUrl;
-  }
-
-  // Only pay the download+encode cost if every URL-shaped field was rejected
-  // (e.g. if this endpoint accepts inline data only).
-  console.log('[generateModel] URL fields all rejected, trying base64');
-  const imgBuffer = await downloadToBuffer(item.tempFileURL);
-  const viaBase64 = await tryCandidates(
-    base64FieldCandidates(imgBuffer.toString('base64'))
+  const res = await httpsPostJson(
+    `${TOKENHUB_BASE}/submit`,
+    buildSubmitBody(model, item.tempFileURL),
+    { Authorization: `Bearer ${key}` }
   );
-  if (viaBase64) {
-    return viaBase64;
+
+  // TokenHub returns `id`; the underlying Rapid job returns `JobId`.
+  const jobId = res.json && (res.json.id || res.json.Id || res.json.JobId);
+  if (res.statusCode !== 200 || !jobId) {
+    console.error(
+      '[generateModel] submit failed:',
+      res.statusCode,
+      res.text && res.text.slice(0, 500)
+    );
+    return {
+      ok: false,
+      error: `submit failed (${res.statusCode})`,
+      body: res.text && res.text.slice(0, 500),
+    };
   }
 
-  return {
-    ok: false,
-    error: 'all image field name candidates were rejected by TokenHub',
-    attempts,
-  };
+  console.log('[generateModel] submitted job', jobId);
+  return { ok: true, jobId, model };
 }
 
 async function query(event) {

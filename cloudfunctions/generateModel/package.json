@@ -1,9 +1,10 @@
 {
   "name": "generateModel",
   "version": "1.0.0",
-  "description": "Photo-to-3D generation pipeline entry (stub: returns placeholder GLB)",
+  "description": "Photo-to-3D via Tencent Hunyuan 3D (rapid); stub fallback without credentials",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "~2.6.3"
+    "wx-server-sdk": "~2.6.3",
+    "tencentcloud-sdk-nodejs-ai3d": "^4.1.265"
   }
 }

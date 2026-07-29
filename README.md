@@ -79,16 +79,21 @@ xr-frame 在开发者工具内置模拟器中的渲染/物理表现并不完全�
 ### 拍照生成流程（Phase 2，当前为占位生成）
 
 预览页「拍照生成」→ `pages/capture/capture`：拍摄/选照片 → 预览确认 → 上传到
-云存储（`captures/`）→ 调用云函数 `generateModel` → 拿到生成的 GLB fileID →
-跳回预览页，预览页将 fileID 换取临时 HTTPS 链接（`wx.cloud.getTempFileURL`）
-并加载该远程模型。**云函数目前是占位实现**：不做真实生成，直接把内置的占位
-GLB 上传到 `models/` 并返回其 fileID——整条「拍照→上传→云函数→存储→查看器加载
-云端模型」链路已可端到端验证，后续只需替换云函数内 STUB 标记之间的部分为真实
-的混元生 3D 调用（接入要点已写在 `cloudfunctions/generateModel/index.js` 头部
-注释：任务提交/轮询、密钥放云函数环境变量等）。
+云存储（`captures/`）→ 云函数 `generateModel` 调用**腾讯混元生 3D（极速版）**
+真实生成：`action: 'submit'` 提交任务返回 jobId（云函数最长执行 60 秒，而生成
+约需 1.5 分钟，故拆分），客户端每 5 秒轮询 `action: 'query'`，任务 DONE 后云
+函数把混元返回的临时 GLB 转存到云存储 `models/` 并返回 fileID → 跳回预览页，
+换取临时 HTTPS 链接加载该模型。
+
+**密钥配置（必需）**：云开发控制台 → 云函数 → `generateModel` → 配置 → 环境
+变量，设置 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`（腾讯云 API 密钥，需已
+开通混元生 3D 并领取免费积分）。**密钥缺失时云函数自动退化为占位模式**（直接
+返回内置占位 GLB），开发环境无腾讯云账号也能跑通全链路。
 
 **云函数部署**：在开发者工具的资源管理器中右键 `cloudfunctions/generateModel`
-→「上传并部署：云端安装依赖」。修改云函数代码后需要重新执行此操作。
+→「上传并部署：云端安装依赖」。修改云函数代码后需要重新执行此操作。依赖含
+`tencentcloud-sdk-nodejs-ai3d`；`config.json` 已把函数超时设为 60 秒（`query`
+在任务完成时要下载 GLB 并转存，默认 3 秒不够）。
 
 > - 云开发环境 ID 已配置在 `miniprogram/app.js`（`cloud1-d0gh8tthce732831b`）。
 > - 正式发布时需将云存储临时链接域名（`*.tcb.qcloud.la`）加入小程序后台的

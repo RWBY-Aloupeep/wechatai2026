@@ -99,17 +99,21 @@ function downloadToBuffer(url) {
   });
 }
 
-// TokenHub's docs only show text-to-3D ({ model, prompt }) -- verified: the
-// whole 3D page contains no image-to-3D example. The underlying Tencent API
-// uses ImageUrl/ImageBase64 (PascalCase) while TokenHub's own fields are
-// lowercase, so rather than guess once and burn a deploy+test cycle per
-// guess, try the plausible spellings in order and log which one works. A
-// rejected request creates no job, so this costs no credits. Once confirmed
-// in the logs, this list can collapse to the single winner.
+// Per TokenHub's docs, "HY-3D-Express 请求的具体参数与 提交混元生3D 极速版任务
+// 接口一致" -- i.e. body params follow SubmitHunyuanTo3DRapidJob, which
+// documents PascalCase ImageUrl / ImageBase64 / ResultFormat / EnablePBR.
+// TokenHub's own example nonetheless shows lowercase `model` and `prompt`,
+// so the exact casing at the gateway is ambiguous; `model` is certainly
+// TokenHub's own routing param. PascalCase (the authoritative spelling) is
+// tried first, with lowercase variants as fallback. Each candidate carries a
+// casing-matched ResultFormat so we always get a single-file GLB rather than
+// relying on the undocumented default (the underlying docs show OBJ results
+// arriving as .zip bundles). A rejected request creates no job, so probing
+// costs no credits; once the logs confirm a winner this list can collapse.
 function urlFieldCandidates(imageUrl) {
   return [
-    { name: 'image_url', body: { image_url: imageUrl } },
-    { name: 'ImageUrl', body: { ImageUrl: imageUrl } },
+    { name: 'ImageUrl', body: { ImageUrl: imageUrl, ResultFormat: 'GLB' } },
+    { name: 'image_url', body: { image_url: imageUrl, result_format: 'GLB' } },
     // OpenAI vision style, in case TokenHub mirrors it here too.
     { name: 'image_url.url', body: { image_url: { url: imageUrl } } },
     { name: 'image', body: { image: imageUrl } },
@@ -118,8 +122,8 @@ function urlFieldCandidates(imageUrl) {
 
 function base64FieldCandidates(imageBase64) {
   return [
-    { name: 'image_base64', body: { image_base64: imageBase64 } },
-    { name: 'ImageBase64', body: { ImageBase64: imageBase64 } },
+    { name: 'ImageBase64', body: { ImageBase64: imageBase64, ResultFormat: 'GLB' } },
+    { name: 'image_base64', body: { image_base64: imageBase64, result_format: 'GLB' } },
   ];
 }
 
@@ -158,7 +162,9 @@ async function submit(event) {
         { model, ...candidate.body },
         { Authorization: `Bearer ${key}` }
       );
-      const jobId = res.json && (res.json.id || res.json.Id);
+      // TokenHub returns `id`; the underlying Rapid job returns `JobId`.
+      const jobId =
+        res.json && (res.json.id || res.json.Id || res.json.JobId);
       if (res.statusCode === 200 && jobId) {
         console.log(
           `[generateModel] submitted job ${jobId} using image field "${candidate.name}"`
@@ -225,26 +231,49 @@ async function query(event) {
     };
   }
 
-  const status = res.json.status;
+  // Accept either response shape: TokenHub's documented lowercase
+  // (status: queued/in_progress/completed, data[].type/url) or the underlying
+  // Rapid-job PascalCase (Status: WAIT/RUN/FAIL/DONE, ResultFile3Ds[].Type/Url).
+  const status = String(res.json.status || res.json.Status || '').toUpperCase();
   console.log('[generateModel] job', jobId, 'status:', status);
 
-  if (status === 'failed' || status === 'FAIL') {
-    return { ok: false, error: res.json.error || 'generation failed' };
+  if (status === 'FAIL' || status === 'FAILED') {
+    return {
+      ok: false,
+      error:
+        res.json.ErrorMessage || res.json.error || 'generation failed',
+      code: res.json.ErrorCode,
+    };
   }
-  if (status !== 'completed') {
-    // queued / in_progress
+  if (status !== 'DONE' && status !== 'COMPLETED') {
+    // WAIT / RUN / queued / in_progress
     return { ok: true, status: 'processing', raw: status };
   }
 
-  const files = res.json.data || [];
-  const glb = files.find((f) => (f.type || '').toLowerCase() === 'glb') || files[0];
-  if (!glb || !glb.url) {
-    return { ok: false, error: 'no result file in completed response' };
+  const files = res.json.data || res.json.ResultFile3Ds || [];
+  const pickType = (f) => String(f.type || f.Type || '').toUpperCase();
+  const glb = files.find((f) => pickType(f) === 'GLB') || files[0];
+  const glbUrl = glb && (glb.url || glb.Url);
+  if (!glbUrl) {
+    return {
+      ok: false,
+      error: 'no result file in completed response',
+      raw: JSON.stringify(res.json).slice(0, 300),
+    };
+  }
+  // OBJ results arrive as .zip bundles (obj + mtl + textures); a zip would
+  // need unpacking before the viewer could load it, so fail loudly rather
+  // than storing a zip under a .glb name.
+  if (glbUrl.split('?')[0].toLowerCase().endsWith('.zip')) {
+    return {
+      ok: false,
+      error: `result is a .zip bundle (type ${pickType(glb)}), not a plain GLB`,
+    };
   }
 
-  // Persist into our own cloud storage: TokenHub's result URL is short-lived,
-  // and the viewer wants a stable fileID.
-  const glbBuffer = await downloadToBuffer(glb.url);
+  // Persist into our own cloud storage: the result URL is short-lived, and
+  // the viewer wants a stable fileID.
+  const glbBuffer = await downloadToBuffer(glbUrl);
   const uploadRes = await cloud.uploadFile({
     cloudPath: `models/${jobId}.glb`,
     fileContent: glbBuffer,

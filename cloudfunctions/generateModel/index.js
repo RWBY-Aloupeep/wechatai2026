@@ -30,8 +30,10 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const AI3D_REGION = 'ap-guangzhou';
 
 function makeAi3dClient() {
-  const secretId = process.env.TENCENT_SECRET_ID;
-  const secretKey = process.env.TENCENT_SECRET_KEY;
+  // Trim: pasting into the console's env-var field easily picks up stray
+  // whitespace/newlines, which Tencent Cloud rejects as an unknown SecretId.
+  const secretId = (process.env.TENCENT_SECRET_ID || '').trim();
+  const secretKey = (process.env.TENCENT_SECRET_KEY || '').trim();
   if (!secretId || !secretKey) {
     return null;
   }
@@ -136,9 +138,44 @@ async function query(event) {
   return { ok: true, status: 'done', modelFileID: uploadRes.fileID };
 }
 
+// Reports the SHAPE of the configured credentials without ever revealing
+// them: length, the (non-secret, universal) AKID prefix, and whitespace
+// detection -- stray whitespace from copy-pasting into the console env-var
+// field is a common cause of "SecretId is not found".
+function diagnose() {
+  const id = process.env.TENCENT_SECRET_ID;
+  const key = process.env.TENCENT_SECRET_KEY;
+  const shape = (v) =>
+    v === undefined
+      ? 'NOT SET'
+      : {
+          length: v.length,
+          hasLeadingOrTrailingSpace: v !== v.trim(),
+          hasInnerWhitespace: /\s/.test(v.trim()),
+          isEmpty: v.trim().length === 0,
+        };
+  return {
+    ok: true,
+    diagnostic: true,
+    secretId: {
+      ...(typeof shape(id) === 'string' ? { state: shape(id) } : shape(id)),
+      // SecretId is an identifier (not a secret) and always starts with
+      // "AKID"; reporting whether that holds is safe and highly diagnostic.
+      startsWithAKID: id ? id.trim().startsWith('AKID') : false,
+      expectedLength: 36,
+    },
+    secretKey: typeof shape(key) === 'string' ? { state: shape(key) } : shape(key),
+    expectedSecretKeyLength: 32,
+    region: AI3D_REGION,
+  };
+}
+
 exports.main = async (event) => {
   try {
     const action = (event && event.action) || 'submit';
+    if (action === 'diagnose') {
+      return diagnose();
+    }
     if (action === 'submit') {
       return await submit(event || {});
     }

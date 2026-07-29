@@ -8,6 +8,5 @@
   style="width: {{width}}px; height: {{height}}px;"
 />
 
-<!-- Phase 2 TODO: a "拍照生成" (capture-to-generate) entry point will sit
-     alongside this Reset button once camera capture / upload UI exists. -->
 <cover-view class="reset-btn" bindtap="onResetTap">重置</cover-view>
+<cover-view class="capture-btn" bindtap="onCaptureTap">拍照生成</cover-view>

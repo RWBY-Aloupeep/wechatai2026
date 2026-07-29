@@ -1,0 +1,16 @@
+<view class="container">
+  <block wx:if="{{!tempFilePath}}">
+    <view class="hint">拍摄或选择一张物体照片，生成它的 3D 模型</view>
+    <button class="primary-btn" bindtap="onChooseImage">拍照 / 选择照片</button>
+  </block>
+
+  <block wx:else>
+    <image class="preview" src="{{tempFilePath}}" mode="aspectFit" />
+    <view class="btn-row">
+      <button class="secondary-btn" bindtap="onChooseImage" disabled="{{uploading}}">重新选择</button>
+      <button class="primary-btn" bindtap="onUpload" loading="{{uploading}}" disabled="{{uploading}}">
+        {{uploading ? '上传中…' : '上传并生成'}}
+      </button>
+    </view>
+  </block>
+</view>

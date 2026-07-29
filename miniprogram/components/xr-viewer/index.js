@@ -90,12 +90,15 @@ Component({
       // component's internal (dirty-flag/typed-array-backed) fields.
       this.modelNode = this.scene.getElementById('model-node');
 
-      // No scale is applied to the glTF here on purpose: the bundled Khronos
-      // "Duck" sample's raw vertex data spans ~165 x 154 x 115 units, but its
-      // root scene node already bakes in a corrective 0.01 scale via its own
-      // `matrix`, bringing it down to a normal ~1.5 units once xr-frame
-      // applies the glTF node hierarchy (which it does, being spec-compliant).
-      // Applying an additional scale here would double-apply the correction.
+      // No scale is applied to the glTF here -- confirmed via live
+      // inspection (getComponent('gltf')._subRoots[0].getComponent(
+      // 'transform')._scale) that xr-frame's <xr-gltf> loader already
+      // reconstructs the GLB's own node hierarchy internally, including its
+      // root node's baked-in 0.01 corrective `matrix` scale, automatically.
+      // An earlier attempt applied an ADDITIONAL 0.01 on top of this on the
+      // outer node, compounding to 0.01 x 0.01 = 0.0001 total -- a duck
+      // rendered at ~1.5cm, far too small to see at any distance. That was
+      // the actual bug: not a missing scale, but a doubled one.
 
       const halfExtents = getProxyHalfExtents(null);
       const { world, dynamicBody } = createPhysicsWorld({

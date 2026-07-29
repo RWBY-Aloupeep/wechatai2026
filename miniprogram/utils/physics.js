@@ -9,7 +9,21 @@ const CANNON = require('cannon-es');
 const GRAVITY = -9.82;
 const GROUND_Y = 0;
 const RESTITUTION = 0.65;
-const FRICTION = 0.4;
+const FRICTION = 0.6;
+// Damping bleeds off residual sliding/tumbling energy after each bounce so
+// the body settles in place rather than slowly drifting -- confirmed on a
+// real device that without this, the toy can tumble/slide far enough over
+// a few bounces (or repeated taps) to drift out of the camera's view.
+const LINEAR_DAMPING = 0.4;
+const ANGULAR_DAMPING = 0.4;
+
+// Invisible static walls keeping the toy within camera view even after
+// many taps, since each tap adds random horizontal velocity with nothing
+// otherwise stopping it from eventually wandering off-screen. Not part of
+// the visual scene (xr-frame has no corresponding element) -- purely a
+// cannon-es containment box centered on the drop origin.
+const BOUNDARY_HALF_EXTENT = 2.5;
+const BOUNDARY_HEIGHT = 6;
 
 // startPosition: {x, y, z} where the dynamic body begins (its "drop" origin).
 // halfExtents: {x, y, z} from utils/proxy-shape.js.
@@ -34,6 +48,8 @@ function createPhysicsWorld({ startPosition, halfExtents }) {
   groundBody.position.set(0, GROUND_Y, 0);
   world.addBody(groundBody);
 
+  addBoundaryWalls(world, groundMaterial, startPosition);
+
   const dynamicBody = new CANNON.Body({
     mass: 1,
     shape: new CANNON.Box(
@@ -41,10 +57,33 @@ function createPhysicsWorld({ startPosition, halfExtents }) {
     ),
     material: toyMaterial,
     position: new CANNON.Vec3(startPosition.x, startPosition.y, startPosition.z),
+    linearDamping: LINEAR_DAMPING,
+    angularDamping: ANGULAR_DAMPING,
   });
   world.addBody(dynamicBody);
 
   return { world, groundBody, dynamicBody };
+}
+
+function addBoundaryWalls(world, groundMaterial, startPosition) {
+  const half = BOUNDARY_HALF_EXTENT;
+  const wallConfigs = [
+    { position: [startPosition.x + half, 0, startPosition.z], rotationY: -Math.PI / 2 },
+    { position: [startPosition.x - half, 0, startPosition.z], rotationY: Math.PI / 2 },
+    { position: [startPosition.x, 0, startPosition.z + half], rotationY: Math.PI },
+    { position: [startPosition.x, 0, startPosition.z - half], rotationY: 0 },
+  ];
+
+  wallConfigs.forEach(({ position, rotationY }) => {
+    const wall = new CANNON.Body({
+      mass: 0,
+      shape: new CANNON.Plane(),
+      material: groundMaterial,
+    });
+    wall.quaternion.setFromEuler(0, rotationY, 0);
+    wall.position.set(position[0], position[1] + BOUNDARY_HEIGHT / 2, position[2]);
+    world.addBody(wall);
+  });
 }
 
 function stepWorld(world, fixedDeltaTime) {

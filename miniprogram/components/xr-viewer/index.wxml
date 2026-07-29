@@ -50,16 +50,24 @@
     <xr-gltf id="model-gltf" model="toy-model" bind:gltf-loaded="onGltfLoaded" />
   </xr-node>
 
-  <!-- camera-orbit-control gives single-finger drag orbit + pinch zoom for
-       free. The `target:` sub-value syntax mirrors the documented rigidbody
-       attribute-string convention (e.g. rigidbody="mass: 5.0"); if orbiting
-       doesn't center on the model correctly, verify this specific syntax
-       against DevTools autocomplete -- everything else in this file (asset
-       loading, physics, tap, scale) is now confirmed working on a real
-       device, so this is the one remaining unverified piece. -->
+  <!-- CONFIRMED via live device inspection (real-time REPL testing through
+       真机调试): xr-frame's default camera orientation (rotation "0 0 0")
+       faces +Z, NOT -Z like the OpenGL/WebGL convention most 3D engines use.
+       Without this explicit 180-degree Y rotation, the camera looks away
+       from the scene entirely -- everything else (position, scale, physics)
+       was independently confirmed correct via the console, so this was the
+       one remaining piece, and it's why the model was invisible despite
+       every other value being right. camera-orbit-control does NOT appear to
+       auto-orient the camera at a target on load -- it only handles
+       touch-driven orbiting from whatever initial transform is set here, so
+       the base rotation still has to be set correctly by hand. The `target:`
+       sub-value syntax mirrors the documented rigidbody attribute-string
+       convention (e.g. rigidbody="mass: 5.0"); if drag-orbit doesn't pivot
+       around the model correctly, this is the next thing to verify. -->
   <xr-camera
     id="main-camera"
     position="0 2 6"
+    rotation="0 180 0"
     clear-color="0.85 0.87 0.9 1"
     camera-orbit-control="target: 0 0.6 0"
   />

@@ -7,10 +7,23 @@ page {
   position: fixed;
   left: 50%;
   bottom: 60rpx;
-  transform: translateX(-50%);
+  transform: translateX(-72%);
   z-index: 10;
   padding: 16rpx 48rpx;
   background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 28rpx;
+  border-radius: 999rpx;
+}
+
+.capture-btn {
+  position: fixed;
+  left: 50%;
+  bottom: 60rpx;
+  transform: translateX(8%);
+  z-index: 10;
+  padding: 16rpx 48rpx;
+  background: #07c160;
   color: #fff;
   font-size: 28rpx;
   border-radius: 999rpx;

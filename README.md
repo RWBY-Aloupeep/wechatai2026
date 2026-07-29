@@ -66,13 +66,47 @@ xr-frame 在开发者工具内置模拟器中的渲染/物理表现并不完全�
 > bug。涉及 `<xr-physics>`（即 tap-to-jump 交互）的验证请直接使用真机预览，
 > 不要依赖模拟器的报错来判断该功能是否正常。
 
+> **已知问题（已修复）：相机默认朝向是 +Z，不是常见 3D 引擎约定的 -Z。**
+> 通过真机调试的控制台实时排查（直接对存活的场景节点求值，而非反复改代码
+> 重新编译）确认：`<xr-camera rotation="0 0 0">`（即不设置 rotation）时，
+> 相机默认朝向 +Z 方向，而不是 OpenGL/WebGL 生态大多数 3D 引擎约定的 -Z。
+> 模型的位置、缩放、物理模拟当时都已确认完全正确，相机却因为朝向反了而完全
+> 看不到场景内容。`camera-orbit-control` 并不会在加载时自动将相机转向
+> `target`——它只基于当前已有的朝向处理触摸拖拽旋转，因此初始 `rotation`
+> 仍需手动设对。当前 `components/xr-viewer/index.wxml` 中 `<xr-camera>` 已加
+> `rotation="0 180 0"` 修正此问题。
+
+### 拍照上传（Phase 2 第一步，已实现客户端部分）
+
+预览页右下角「拍照生成」按钮进入 `pages/capture/capture`：拍摄或从相册选择
+一张照片 → 预览确认 → 上传到微信云开发存储（`captures/` 目录）→ 跳回预览页，
+照片的云端 fileID 通过页面参数 `imageFileID` 传入（当前仅在 console 打印，
+即未来生成管线的输入）。3D 模型此时仍为内置示例；接入真实生成服务后，云函数
+将以该 fileID 为输入产出 GLB 并替换模型来源。
+
+> 上传依赖云开发环境：需在微信开发者工具中为当前 AppID 开通云开发并选择环境
+> （`miniprogram/app.js` 中 `env` 为空字符串时使用默认环境；如上传报环境相关
+> 错误，请在 `app.js` 的 `globalData.env` 填入实际环境 ID）。
+
+### 图生 3D 服务选型（调研结论，尚未接入）
+
+推荐 **腾讯混元生 3D（极速版）**（`cloud.tencent.com/product/ai3d`）：与微信
+同生态（云函数内用腾讯云 SDK 直接调用，无跨境网络/外币支付问题）、支持单图
+生 3D、极速版约 1 分半出模型（适合小程序交互节奏）、按积分计费且首次开通有
+免费额度、异步"提交任务 + 轮询"的 API 形态与云函数/客户端轮询天然匹配。注意
+官方文档提到新模型服务在向 TokenHub 平台迁移，接入时以控制台实际开通路径
+为准。备选：Tripo（$0.01/积分，注册送 2000 积分）、Meshy、Rodin（质量最高、
+最贵）——均为海外服务，云函数跨境调用与付款均有额外摩擦，仅在混元质量/时延
+不满足时考虑。
+
 ### 已知限制 / Phase 2 预留点
 
-- 模型来源目前是本地内置的 `miniprogram/assets/sample.glb`；Phase 2 接入拍照
-  生成的云端模型时，只需替换资源来源（详见 `components/xr-viewer/index.wxml`
-  与 `index.js` 中 `onSceneReady` 附近的注释）。
+- 模型来源目前是本地内置的 `miniprogram/assets/sample.glb`；接入生成服务后，
+  只需替换资源来源（详见 `components/xr-viewer/index.wxml` 与 `index.js` 中
+  `onSceneReady` 附近的注释）。上传照片的 fileID 已作为页面参数打通（见上）。
 - 碰撞代理目前是手工指定的包围盒（`miniprogram/utils/proxy-shape.js` 中的
   `FALLBACK_HALF_EXTENTS`），Phase 2 将替换为随模型一起生成的凸包。
-- 暂无拍照/上传 UI；预留位置见 `pages/viewer/viewer.js` 的 `onModelReady` 与
-  `viewer.wxml` 中「重置」按钮旁的注释。
+- `camera-orbit-control` 的双指捏合缩放在真机上无效（拖拽旋转正常；已通过
+  真机调试确认 `isLockZoom: false`、`zoomSpeed: 1`，动态改 `zoomMin`/
+  `zoomMax`/`isEnabled` 均无效果），原因未明，暂缓处理。
 

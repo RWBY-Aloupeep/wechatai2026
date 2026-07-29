@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/viewer/viewer",
+    "pages/capture/capture",
     "pages/index/index",
     "pages/example/index"
   ],
